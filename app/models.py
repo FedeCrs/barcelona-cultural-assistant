@@ -1,5 +1,6 @@
 # Definimos el modelo Usuario basado en la tabla `usuarios` de MySQL
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
 
@@ -16,4 +17,14 @@ class Usuario(Base):
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
     activo = Column(Boolean, default=True)
 
-    
+
+# Modelo Evento
+class Evento(Base):
+    __tablename__ = "eventos"
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String(100), nullable=False)
+    descripcion = Column(String(250), nullable=True)
+    fecha_hora = Column(DateTime, default=datetime.utcnow)
+    local_id = Column(Integer, ForeignKey("usuarios.id"))
+
+    local = relationship("Usuario", backref="eventos")

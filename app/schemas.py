@@ -31,3 +31,19 @@ class Usuario(UsuarioBase):
     
 class Pregunta(BaseModel):
     message: str
+
+    # --- Nuevo schema para eventos ---
+class EventoBase(BaseModel):
+    nombre: str
+    fecha: datetime
+    lugar: Optional[str] = None
+
+class EventoCreate(EventoBase):
+    pass
+
+class Evento(EventoBase):
+    id: int
+
+    model_config = {
+        "from_attributes": True
+    }

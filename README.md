@@ -69,6 +69,7 @@ Ejecutar la aplicación:
 bash
 Copy code
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+npm run dev para correr el front en una ventana nueva del terminal
 Uso básico
 Acceder a /ping para probar que el servidor está corriendo.
 

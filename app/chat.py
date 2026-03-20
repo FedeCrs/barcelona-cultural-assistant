@@ -1,102 +1,119 @@
 import re
 from sqlalchemy.orm import Session
-from app import crud # Asumo que crud contiene search_espacios_por_nombre_o_direccion
+from app import crud, schemas
 from app.gemini import ask_gemini
-from app.embeddings import get_chroma_collection, generar_embedding # Asegúrate de que generen_embedding esté bien
+from app.embeddings import get_chroma_collection, generar_embedding  # Si usas embeddings
+
+
+def limpiar_pregunta(pregunta: str) -> str:
+    """
+    Elimina palabras comunes y palabras irrelevantes como 'bar', 'pub', etc.
+    """
+    pregunta = pregunta.lower()
+    pregunta = re.sub(r'[^a-záéíóúüñ0-9\s]', '', pregunta)
+
+    palabras_comunes = [
+        'donde','queda','esta','es','el','la','los','las','barcelona','en',
+        'un','una','hay','por','del','de','al','me','gustaria','saber',
+        'necesito','que','su','cuanto','cuesta','se','encuentra',
+        'hola','quiero','quieres','me','podrias','informame',
+        # Palabras que no aportan al nombre real
+        'bar','pub','club','cafe','restaurante','local'
+    ]
+    palabras = [p for p in pregunta.split() if p not in palabras_comunes and len(p) > 1]
+    return " ".join(palabras).strip()
+
 
 def procesar_pregunta(pregunta: str, db: Session):
     print("🔎 Pregunta recibida:", pregunta)
+    
+    # 🔹 Detectar cierre del chat
+    frases_cierre = ["no", "no gracias", "gracias", "eso es todo", "chau", "adiós", "me voy"]
+    if any(frase in pregunta.lower() for frase in frases_cierre):
+        return "¡Perfecto! 😊 Me alegra haberte ayudado. ¡Hasta luego! 👋"
 
-    # 1. Limpiar la pregunta
     texto_limpio = limpiar_pregunta(pregunta)
-    print("🧽 Pregunta limpia:", texto_limpio)
+    print("Pregunta limpia:", texto_limpio)
 
-    contexto_db = "" # Inicializamos el contexto que pasaremos a Gemini
-
-    # 2. Buscar por nombre o dirección en SQL
+    # 1 Buscar en la BD por nombre o dirección
     try:
         resultados_sql = crud.search_espacios_por_nombre_o_direccion(db, texto_limpio)
-        print("🔎 Resultados exactos de SQL:", resultados_sql)
-        if resultados_sql:
-            contexto_db += "Información encontrada en la base de datos local sobre espacios culturales:\n"
-            for r in resultados_sql:
-                # Aquí incluimos toda la info relevante para que Gemini tenga la dirección
-                contexto_db += f"- Nombre: {r.user_name}, Dirección: {r.direccion}, Teléfono: {r.telefono or 'N/A'}\n"
-            print(f"✅ SQL encontró respuesta local. Contexto para Gemini: {contexto_db[:200]}...") # Imprime solo el inicio
-        else:
-            print("❌ SQL: No se encontraron resultados por nombre o dirección.")
     except Exception as e:
         print(f"🚨 ERROR en búsqueda SQL: {e}")
+        resultados_sql = []
 
-    # 3. Buscar por vectores (embeddings) - Solo si la búsqueda SQL no encontró nada
-    # (Esto evita duplicar la búsqueda o usar ChromaDB si ya tienes info directa)
-    if not contexto_db: 
-        try:
-            collection = get_chroma_collection()
-            
-            query_vector = generar_embedding(texto_limpio)
-            print("Embedding generado para la pregunta (primeros 10 val):", query_vector[:10])
-            
-            resultados_vectores = collection.query(
-                query_embeddings=[query_vector],
-                n_results=3, # Puedes ajustar el número de resultados de ChromaDB
-                include=["documents", "distances", "ids"]
+    if resultados_sql:
+        r = resultados_sql[0]
+        direccion = r.direccion
+
+        if direccion:
+            # Pedimos el barrio a Gemini
+            direccion_completa = f"{direccion}, Barcelona"
+            prompt_barrio = (
+                f"La siguiente dirección está en Barcelona: '{direccion_completa}'. "
+                "Dime en qué barrio de Barcelona se encuentra. "
+                "Responde solo con el nombre del barrio, nada más."
             )
-            print("🔍 Resultados de búsqueda por vectores:", resultados_vectores)
+            try:
+                barrio = ask_gemini(prompt_barrio, "").strip()
+                if not barrio or len(barrio) < 3:
+                    barrio = "algún barrio de Barcelona que no logré identificar 🤔"
+            except Exception as e:
+                print(f"❌ ERROR al pedir barrio a Gemini: {e}")
+                barrio = "desconocido 🤔"
 
-            documentos = resultados_vectores.get("documents", [[]])[0]
-            distancias = resultados_vectores.get("distances", [[]])[0]
+            # Construimos la respuesta
+            respuesta = (
+                f"😉 Claro, el {r.user_name} está en {direccion}, "
+                f"en el barrio de {barrio}."
+            )
+            # Frase de seguimiento
+            respuesta += " ¿Necesitas que te ayude con algo más? 🤔"
 
-            # Puedes añadir un umbral de distancia si quieres que los resultados sean muy relevantes
-            # Por ejemplo, si distancias[0] es menor que 0.3 (significa 70% de similitud)
-            if documentos and distancias and distancias[0] < 0.3: # Añadimos una condición para que el resultado sea relevante
-                contexto_db += "Información similar encontrada por búsqueda vectorial (ordenada por similitud):\n"
-                # Ordenar por similitud (1 - distancia)
-                for doc, dist in sorted(zip(documentos, distancias), key=lambda x: x[1]):
-                    contexto_db += f"- {doc} (similitud: {1 - dist:.2f})\n"
-                print(f"✅ ChromaDB encontró resultados. Contexto para Gemini: {contexto_db[:200]}...")
-            else:
-                print("❌ ChromaDB: No se encontraron resultados por vectores relevantes o suficientemente similares.")
+            return respuesta
+        else:
+            return f"Tengo registrado **{r.user_name}**, pero aún no tengo su dirección guardada 🤔"
 
-        except Exception as e:
-            print(f"❌ ERROR en búsqueda por vectores (ChromaDB): {e}")
-
-    # 4. Llamar a Gemini con el contexto (sea lleno o vacío)
-    # El prompt modificado en app/gemini.py se encargará de usar la BD o el conocimiento general
-    if not contexto_db:
-        print("🧠 Contexto final para Gemini: Vacío. Gemini usará su conocimiento general.")
-        contexto_para_gemini = "No se encontró información específica en la base de datos local."
-    else:
-        print("🧠 Contexto final para Gemini: Usando información de la DB local.")
-        contexto_para_gemini = contexto_db
-    
+    # 2 Si no está en la BD, buscar en la web con Gemini
     try:
-        respuesta = ask_gemini(pregunta, contexto_para_gemini)
-        print(f"🤖 Respuesta final generada por Gemini: {respuesta[:200]}...") # Imprime solo el inicio
-        return respuesta
+        prompt_busqueda = (
+            f"Necesito la dirección exacta en Barcelona de '{texto_limpio}'. "
+            "Responde solo con la dirección y nada más."
+        )
+        direccion = ask_gemini(prompt_busqueda, "").strip()
+        print(f"🌍 Dirección obtenida de Gemini: {direccion}")
+
+        if direccion and "Barcelona" in direccion:
+            # Pedir barrio a Gemini
+            prompt_barrio = (
+                f"Dada la dirección: '{direccion}', en Barcelona, "
+                "responde únicamente con el nombre del barrio al que pertenece."
+            )
+            try:
+                barrio = ask_gemini(prompt_barrio, "").strip()
+                if not barrio or len(barrio) < 3:
+                    barrio = "algún barrio de Barcelona que no logré identificar 🤔"
+            except Exception as e:
+                print(f"❌ ERROR al pedir barrio a Gemini: {e}")
+                barrio = "desconocido 🤔"
+
+            # Guardar en la BD
+            nuevo_usuario = schemas.UsuarioCreate(
+                user_name=texto_limpio.title(),
+                direccion=direccion,
+                email=None,
+                telefono=None
+            )
+            crud.create_usuario(db, nuevo_usuario)
+            print(f"💾 Dirección guardada en la BD: {direccion}")
+
+            return (
+                f"📌 He buscado y encontré que **{texto_limpio.title()}** está en **{direccion}**, "
+                f"en el barrio de **{barrio}**. Ya lo guardé en mi base de datos para la próxima 😉"
+            )
+        else:
+            return f"😅 No pude encontrar la dirección de **{texto_limpio.title()}** en Barcelona."
+
     except Exception as e:
-        print("❌ ERROR al consultar Gemini como último recurso:", str(e))
-        return "Lo siento, no se pudo procesar tu pregunta en este momento."
-
-
-# Limpieza de pregunta para búsqueda
-def limpiar_pregunta(pregunta: str) -> str:
-    """
-    Elimina palabras comunes y caracteres especiales para limpiar la pregunta de búsqueda.
-    """
-    pregunta = pregunta.lower()
-    # Elimina todo lo que no sea letra, número o espacio
-    pregunta = re.sub(r'[^a-záéíóúüñ\s]', '', pregunta) # Incluye caracteres españoles
-    
-    palabras_comunes = [
-        'donde', 'queda', 'esta', 'es', 'el', 'la', 'los', 'las',
-        'barcelona', 'en', 'un', 'una', 'hay', 'por', 'del', 'de', 'al',
-        'me', 'gustaria', 'saber', 'necesito', 'que', 'en', 'su', 'cuanto',
-        'cuesta', 'el', 'la', 'un', 'una', 'a', 'del', 'de', 'al', 'se', 'encuentra'
-    ]
-    
-    palabras = pregunta.split()
-    # Filtramos palabras comunes, solo si la palabra no es solo una letra
-    palabras_filtradas = [p for p in palabras if p not in palabras_comunes and len(p) > 1]
-    
-    return " ".join(palabras_filtradas).strip()
+        print(f"❌ ERROR al buscar en la web con Gemini: {e}")
+        return "Lo siento, no pude encontrar esa dirección en este momento."

@@ -8,7 +8,7 @@ function BarcelOCultas() {
     <>
       Barcelona
       <br />
-      Oculta
+      Ocultas
     </>
   );
 }
@@ -133,15 +133,15 @@ function ChatPage() {
           <div className="bg-gray-900 p-3 md:p-4 flex items-center border-t border-gray-700 flex-shrink-0 rounded-bl-lg space-y-2">
             <div className="flex items-center space-x-3">
               <textarea
-                rows={1}
+                rows={2}
                 name="userMessage"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyPress}
                 placeholder="Pregunta lo que quieras..."
                 disabled={loading}
-                className="flex-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-transparent text-gray-100 placeholder-gray-400 resize-none scrollbar-thin scrollbar-thumb-gray-500 scrollbar-track-gray-700 disabled:opacity-50"
-                style={{ maxHeight: '80px' }} // Adjusted max height
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-3 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-transparent text-gray-100 placeholder-gray-400 resize-none scrollbar-thin scrollbar-thumb-gray-500 scrollbar-track-gray-700 disabled:opacity-50"
+                style={{ maxHeight: '200px' }} // Adjusted max height
               />
               <button
                 onClick={handleSend}

@@ -1,7 +1,6 @@
 # Node / Frontend
 node_modules/
 frontend/node_modules/
-package-lock.json
 
 # Python / Backend
 __pycache__/
@@ -10,16 +9,21 @@ __pycache__/
 *.pyd
 venv/
 backend/venv/
-*.sql
+
 # Environment variables
 .env
 .env.*
 *.db
+*.sqlite3
+
 # Logs / output
 *.log
-*.sqlite3
-node_modules/
+
 # OS files
 .DS_Store
 Thumbs.db
-.env
+
+# Data / dumps / backups
+*.sql
+*.zip
+*.mov
